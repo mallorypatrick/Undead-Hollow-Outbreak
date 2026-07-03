@@ -16,7 +16,18 @@ window.addEventListener('DOMContentLoaded', () => {
   video.style.top = '-9999px';
   document.body.appendChild(video);
 
-  const app = new AppController(canvas, video);
+  // Separate element for the level-39 ending cutscenes (see AppController's
+  // 'ending_video' state) - plays once with real sound, unlike the muted
+  // looping menu background above, so it needs its own <video>.
+  const cutsceneVideo = document.createElement('video');
+  cutsceneVideo.loop = false;
+  cutsceneVideo.playsInline = true;
+  cutsceneVideo.style.position = 'fixed';
+  cutsceneVideo.style.left = '-9999px';
+  cutsceneVideo.style.top = '-9999px';
+  document.body.appendChild(cutsceneVideo);
+
+  const app = new AppController(canvas, video, cutsceneVideo);
   window.__app = app; // dev-only debug hook, inspect via preview_eval
   app.start();
 });

@@ -615,12 +615,31 @@ export class MenuSystem {
 
   drawEndingCure(ctx, videoEl, mouseScreen) {
     const scroll = this.endingScroll % (ENDING_CURE_HEIGHT + 400);
-    this._drawScrollText(ctx, videoEl, mouseScreen, ENDING_CURE_LINES, scroll, 'MAIN MENU');
+    this._drawScrollText(ctx, videoEl, mouseScreen, ENDING_CURE_LINES, scroll, 'CREDITS');
   }
 
   drawEndingSuccumb(ctx, videoEl, mouseScreen) {
     const scroll = this.endingScroll % (ENDING_SUCCUMB_HEIGHT + 400);
-    this._drawScrollText(ctx, videoEl, mouseScreen, ENDING_SUCCUMB_LINES, scroll, 'MAIN MENU');
+    this._drawScrollText(ctx, videoEl, mouseScreen, ENDING_SUCCUMB_LINES, scroll, 'CREDITS');
+  }
+
+  // The good/bad ending cutscene (see AppController's 'ending_video' state) -
+  // real recorded video, played once at full opacity (unlike
+  // drawVideoBackground's looping muted backdrop, which darkens itself by
+  // 40% since it's meant to sit behind text) with a skip hint over it.
+  drawEndingVideo(ctx, cutsceneVideoEl) {
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, 1920, 1080);
+    if (cutsceneVideoEl && cutsceneVideoEl.readyState >= 2) {
+      ctx.drawImage(cutsceneVideoEl, 0, 0, 1920, 1080);
+    }
+    ctx.save();
+    ctx.textAlign = 'right';
+    ctx.font = '18px monospace';
+    ctx.fillStyle = 'rgba(232,228,216,0.7)';
+    ctx.fillText('Click or press Enter/Esc to skip', 1890, 1050);
+    ctx.textAlign = 'left';
+    ctx.restore();
   }
 
   // The opening story crawl - same rendering as the endings below, but a

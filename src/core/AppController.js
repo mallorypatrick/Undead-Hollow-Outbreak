@@ -25,13 +25,17 @@ for (let i = 65; i <= 90; i++) {
 }
 
 export class AppController {
-  constructor(canvas, videoEl) {
+  constructor(canvas, videoEl, cutsceneVideoEl) {
     // The real, visible canvas - always native resolution, CSS-scaled to
     // fit the window. Nothing draws to it directly except the final,
     // possibly-filtered blit at the end of each frame.
     this.renderer = new Renderer(canvas);
     this.input = new Input(canvas);
     this.video = videoEl;
+    // The level-39 ending cutscene video (see 'ending_video' state) - a
+    // separate element from the muted looping menu background above, since
+    // this one plays once with real sound.
+    this.cutsceneVideo = cutsceneVideoEl;
     this.menu = new MenuSystem();
     this.graphicsFilter = new GraphicsFilter(INTERNAL_WIDTH, INTERNAL_HEIGHT);
 
@@ -146,6 +150,8 @@ export class AppController {
       stopMenuMusic();
     } else if (this.state === 'paused') {
       startMenuMusic('pause');
+    } else if (this.state === 'ending_video') {
+      stopMenuMusic(); // the cutscene has its own audio - no menu theme underneath it
     } else {
       startMenuMusic('menu');
     }
@@ -202,6 +208,10 @@ export class AppController {
         this._updateEndingScreen();
         this.input.endFrame();
         break;
+      case 'ending_video':
+        this._updateEndingVideo();
+        this.input.endFrame();
+        break;
       case 'cheats':
         this._updateCheatsPanel();
         this.input.endFrame();
@@ -233,7 +243,13 @@ export class AppController {
           const ending = this.game.pendingEnding;
           unlockAchievement(ending === 'cure' ? ACHIEVEMENTS.CAMPAIGN_COMPLETE_CURE : ACHIEVEMENTS.CAMPAIGN_COMPLETE_SUCCUMB);
           this.game = null;
-          this.state = ending === 'cure' ? 'ending_cure' : 'ending_succumb';
+          this._pendingEndingType = ending;
+          this.cutsceneVideo.src = `assets/video/ending_${ending}.mp4`;
+          this.cutsceneVideo.currentTime = 0;
+          this.cutsceneVideo.muted = !this.settings.soundOn;
+          this.cutsceneVideo.volume = this.settings.volume;
+          this.cutsceneVideo.play().catch(() => { /* needs a user gesture on some browsers */ });
+          this.state = 'ending_video';
         }
         break;
       }
@@ -268,6 +284,9 @@ export class AppController {
         break;
       case 'ending_succumb':
         this.menu.drawEndingSuccumb(ctx, this.video, this.input.mouseScreen);
+        break;
+      case 'ending_video':
+        this.menu.drawEndingVideo(ctx, this.cutsceneVideo);
         break;
       case 'settings':
         this.menu.drawSettings(ctx, this.video, this.input.mouseScreen, this.settings);
@@ -383,11 +402,30 @@ export class AppController {
     }
   }
 
+  // Level 39's good/bad ending cutscene (see the 'playing' case's
+  // pendingEnding handling for how cutsceneVideo.src gets set) - plays once,
+  // then hands off to the existing ending_cure/ending_succumb text-scroll
+  // screen for the narrative beat, same skip-or-let-it-finish pattern as
+  // the story intro above.
+  _updateEndingVideo() {
+    const skipClicked = this.input.wasMouseJustPressed();
+    const skipKeyPressed = this.input.wasJustPressed('Escape') || this.input.wasJustPressed('Space') || this.input.wasJustPressed('Enter') || this.input.wasJustPressed('GamepadPause');
+    if (skipClicked || skipKeyPressed || this.cutsceneVideo.ended) {
+      this.cutsceneVideo.pause();
+      this.state = this._pendingEndingType === 'cure' ? 'ending_cure' : 'ending_succumb';
+    }
+  }
+
   // --- level-39 branching endings ---
 
   _updateEndingScreen() {
     if (this.input.wasMouseJustPressed() && pointInRect(this.input.mouseScreen.x, this.input.mouseScreen.y, BACK_BUTTON)) {
-      this.state = 'main_menu';
+      // The campaign's ending flows straight into the credits rather than
+      // back to the main menu - _returnState is what the credits screen's
+      // own BACK button reads (see _updateCredits), so it still lands on
+      // the main menu from there.
+      this._returnState = 'main_menu';
+      this.state = 'credits';
     }
   }
 
