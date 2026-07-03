@@ -22,7 +22,7 @@ import { buildEnvironment } from '../systems/MapBuilder.js';
 import { getTilesetTile } from '../assets/TilesetLoader.js';
 import { drawDecoration } from '../systems/DecorationRenderer.js';
 import {
-  playSound, updateAmbience,
+  playSound, updateAmbience, setWeaponsMuffled,
   startWaterProximityAmbience, stopWaterProximityAmbience,
   startUnderwaterAmbience, stopUnderwaterAmbience,
 } from '../systems/AudioManager.js';
@@ -217,6 +217,7 @@ export class Game {
     // bleed into the new level until proximity happens to re-evaluate it.
     stopWaterProximityAmbience();
     stopUnderwaterAmbience();
+    setWeaponsMuffled(false);
 
     this._survivalTime = 0;
     this._deathHandled = false;
@@ -611,12 +612,25 @@ export class Game {
     for (const zombie of this.zombies) {
       if (!zombie.alive) continue;
 
+      const prevX = zombie.x;
+      const prevY = zombie.y;
       const target = this._findHostileTarget(zombie);
       const result = zombie.update(dt, target);
 
       if (zombie.state !== 'death') {
         CollisionSystem.resolveCircleVsWalls(zombie, this.colliders);
         CollisionSystem.clampToWorld(zombie, WORLD_WIDTH, WORLD_HEIGHT);
+
+        // The undead can't cross water at all (military can - they're
+        // human, not undead) - treated like a wall: if this frame's AI
+        // movement would put a non-military zombie inside any water zone,
+        // shallow or deep, undo just the movement and leave it stalled at
+        // the water's edge, same "post-hoc correction" idea as the wall
+        // collision resolve above rather than real ellipse geometry.
+        if (zombie.faction !== 'military' && this._getWaterDepthAt(zombie.x, zombie.y)) {
+          zombie.x = prevX;
+          zombie.y = prevY;
+        }
       }
 
       if (result.attacked && target) {
@@ -730,12 +744,14 @@ export class Game {
     if (this.player.isDead) {
       stopUnderwaterAmbience();
       stopWaterProximityAmbience();
+      setWeaponsMuffled(false);
       return;
     }
 
     const info = this._getWaterDepthAt(this.player.x, this.player.y);
     this.player.waterDepth = info ? info.depth : null;
     this.player.waterType = info ? info.type : null;
+    setWeaponsMuffled(!!this.player.waterDepth);
 
     for (const zombie of this.zombies) {
       if (zombie.state === 'death') continue;

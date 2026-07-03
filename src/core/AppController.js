@@ -75,7 +75,7 @@ export class AppController {
     // players with an older save blob that predates it.
     this.settings = {
       volume: 0.7, graphicsStyle: 'pc', quality: 'high', fullscreen: false, realBulletSprites: false,
-      musicOn: true, soundOn: true, dayNight: 'night', flashlightEnabled: true,
+      musicOn: true, soundOn: true, dayNight: 'day', flashlightEnabled: true,
     };
     Object.assign(this.settings, this._loadSettings());
     this._draggingVolume = false;

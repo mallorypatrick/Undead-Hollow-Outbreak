@@ -372,8 +372,21 @@ for (const [key, variants] of Object.entries(REAL_SFX_FILES)) {
   loadRealSfx(key, variants);
 }
 
+// Weapon-fire muffling while standing in water (shallow or deep) - see
+// setWeaponsMuffled, called from Game._updateWaterEffects. Scoped to just
+// the gunshot/bow-release sound itself, not reload/draw/holster clicks.
+const WEAPON_FIRE_KEYS = new Set(['handgun_shot', 'revolver_shot', 'rifle_shot', 'smg_shot', 'shotgun_blast', 'xbow_fire']);
+let weaponsMuffled = false;
+
+export function setWeaponsMuffled(muffled) {
+  weaponsMuffled = muffled;
+}
+
 // Clones the cached element so rapid repeat shots can overlap instead of
-// cutting each other off.
+// cutting each other off. Weapon-fire keys get routed through a lowpass
+// filter + reduced gain instead of played directly when weaponsMuffled is
+// set, same "own tiny Web Audio graph per instance" technique as the night
+// ambience filter.
 function tryPlayRealSfx(key) {
   const handles = realSfxCache.get(key);
   if (!handles) return false;
@@ -382,7 +395,22 @@ function tryPlayRealSfx(key) {
 
   const handle = ready[Math.floor(Math.random() * ready.length)];
   const instance = handle.element.cloneNode(true);
-  instance.volume = Math.max(0, Math.min(1, handle.element.volume * (audioManager.volume / 0.7)));
+  const vol = Math.max(0, Math.min(1, handle.element.volume * (audioManager.volume / 0.7)));
+
+  if (weaponsMuffled && WEAPON_FIRE_KEYS.has(key)) {
+    const ctx = audioManager._ensureContext();
+    const source = ctx.createMediaElementSource(instance);
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.value = 450;
+    const gain = ctx.createGain();
+    gain.gain.value = vol * 0.55;
+    source.connect(filter);
+    filter.connect(gain);
+    gain.connect(audioManager.masterGain);
+  } else {
+    instance.volume = vol;
+  }
   instance.play().catch(() => {});
   return true;
 }
@@ -490,13 +518,25 @@ export function setMasterVolume(volume) {
   if (_underwaterAudio) _underwaterAudio.volume = 0.5 * (volume / 0.7);
 }
 
+// Synthesized-fallback counterpart to tryPlayRealSfx's muffling (SMG/M4
+// never got a real recorded fire clip, so they always go through here) -
+// just dials the same playShot params toward duller/quieter rather than
+// adding a separate filter node, since playShot already has one.
+function playWeaponShot(params) {
+  if (weaponsMuffled) {
+    audioManager.playShot({ ...params, filterFreq: Math.min(params.filterFreq, 500), noiseDuration: params.noiseDuration * 1.3 });
+  } else {
+    audioManager.playShot(params);
+  }
+}
+
 const SOUND_DEFS = {
-  handgun_shot: () => audioManager.playShot({ freq: 260, noiseDuration: 0.08, decay: 0.12, filterFreq: 2200 }),
-  revolver_shot: () => audioManager.playShot({ freq: 190, noiseDuration: 0.13, decay: 0.19, filterFreq: 1900 }),
-  rifle_shot: () => audioManager.playShot({ freq: 150, noiseDuration: 0.16, decay: 0.24, filterFreq: 2600 }),
-  smg_shot: () => audioManager.playShot({ freq: 320, noiseDuration: 0.05, decay: 0.08, filterFreq: 2000 }),
-  shotgun_blast: () => audioManager.playShot({ freq: 120, noiseDuration: 0.22, decay: 0.3, filterFreq: 1400 }),
-  xbow_fire: () => audioManager.playShot({ freq: 400, noiseDuration: 0.04, decay: 0.06, filterFreq: 3000 }),
+  handgun_shot: () => playWeaponShot({ freq: 260, noiseDuration: 0.08, decay: 0.12, filterFreq: 2200 }),
+  revolver_shot: () => playWeaponShot({ freq: 190, noiseDuration: 0.13, decay: 0.19, filterFreq: 1900 }),
+  rifle_shot: () => playWeaponShot({ freq: 150, noiseDuration: 0.16, decay: 0.24, filterFreq: 2600 }),
+  smg_shot: () => playWeaponShot({ freq: 320, noiseDuration: 0.05, decay: 0.08, filterFreq: 2000 }),
+  shotgun_blast: () => playWeaponShot({ freq: 120, noiseDuration: 0.22, decay: 0.3, filterFreq: 1400 }),
+  xbow_fire: () => playWeaponShot({ freq: 400, noiseDuration: 0.04, decay: 0.06, filterFreq: 3000 }),
   reload_generic: () => audioManager.playClick({ freq: 700, duration: 0.04 }),
   shotgun_shell_in: () => audioManager.playClick({ freq: 480, duration: 0.06 }),
   pistol_reload: () => audioManager.playClick({ freq: 650, duration: 0.05 }),
