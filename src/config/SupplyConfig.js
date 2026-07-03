@@ -32,7 +32,12 @@ export const SupplyConfig = {
   weapon_crate: {
     id: 'weapon_crate',
     displayName: 'Weapon Crate',
-    iconFolder: 'assets/items/weapon_crate/',
+    // No real crate art exists in any of the source packs (checked the
+    // pickup spritesheet's other cells - they're all ammo/tactical items,
+    // not a crate) - iconFolder stays null so this always uses its
+    // procedural icon (ProceduralSpriteSheets.generateSupplyIcon) instead
+    // of requesting a file that will only ever 404.
+    iconFolder: null,
     apply(player) {
       return player.grantRandomWeapon();
     },
@@ -40,7 +45,7 @@ export const SupplyConfig = {
   food: {
     id: 'food',
     displayName: 'Food',
-    iconFolder: 'assets/items/food/',
+    iconFolder: null, // see weapon_crate's comment above - no real art exists for this one either
     apply(player) {
       player.heal(10);
       return 'Ate Food (+10 HP)';
@@ -49,7 +54,7 @@ export const SupplyConfig = {
   water: {
     id: 'water',
     displayName: 'Water',
-    iconFolder: 'assets/items/water/',
+    iconFolder: null, // see weapon_crate's comment above - no real art exists for this one either
     apply(player) {
       player.heal(10);
       return 'Drank Water (+10 HP)';
