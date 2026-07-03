@@ -1,0 +1,19 @@
+{
+  "name": "undead-hollow",
+  "version": "1.0.0",
+  "description": "Undead Hollow: Outbreak - a 2D top-down zombie survival shooter",
+  "main": "desktop/main.js",
+  "author": "Patrick Mallory (Doomguy) / IrishPaddyVR Galactic Dreams Entertainment Studios LLC",
+  "license": "UNLICENSED",
+  "private": true,
+  "scripts": {
+    "dev": "electron .",
+    "build:windows": "node desktop/set-target.js windows && electron-builder --config desktop/build/windows.config.js",
+    "build:gog": "node desktop/set-target.js gog && electron-builder --config desktop/build/gog.config.js",
+    "build:steam": "node desktop/set-target.js steam && electron-builder --config desktop/build/steam.config.js"
+  },
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3"
+  }
+}
