@@ -269,6 +269,8 @@ function stopAllLoops() {
   for (const key of Array.from(audioManager.loops.keys())) {
     audioManager.stopLoop(key);
   }
+  stopWaterProximityAmbience();
+  stopUnderwaterAmbience();
 }
 
 const SFX_FOLDER = 'assets/audio/sfx/';
@@ -339,6 +341,16 @@ const REAL_SFX_FILES = {
   shotgun_holster: [{ file: 'DBSGUN_HOLSTR.wav', volume: 0.6 }],
   bow_draw: [{ file: 'XBOW_DRAW.wav', volume: 0.6 }],
   bow_holster: [{ file: 'XBOW_HOLSTR.wav', volume: 0.6 }],
+  // Wading through shallow/swamp water - overrides footstep_walk while the
+  // entity's waterDepth is 'shallow' (see Player/Zombie water handling).
+  wade: [
+    { file: 'WADE1.WAV', volume: 0.5 },
+    { file: 'WADE2.WAV', volume: 0.5 },
+    { file: 'WADE3.WAV', volume: 0.5 },
+  ],
+  // Drowning death (deep water, breath hits zero) - player/military only,
+  // see Player._die/Zombie's military breath handling.
+  drown: [{ file: 'DIE_UW.WAV', volume: 0.75 }],
 };
 
 const realSfxCache = new Map(); // key -> array of handles
@@ -474,6 +486,8 @@ export function setMasterVolume(volume) {
     const real = realLoopElements.get(key);
     if (real) real.element.volume = Math.max(0, Math.min(1, baseVolume * (volume / 0.7)));
   }
+  if (_waterProximityAudio) _waterProximityAudio.volume = 0.4 * (volume / 0.7);
+  if (_underwaterAudio) _underwaterAudio.volume = 0.5 * (volume / 0.7);
 }
 
 const SOUND_DEFS = {
@@ -524,6 +538,8 @@ const SOUND_DEFS = {
     audioManager.playGutturalHit({ freq: 110, duration: 0.22 });
     audioManager.playGroan({ baseFreq: 170, vibratoRate: 9, vibratoDepth: 45, duration: 0.9, type: 'sawtooth', peak: 0.3, pitchDrift: -120 });
   },
+  wade: () => audioManager.playClick({ freq: 250 + Math.random() * 80, duration: 0.08 }),
+  drown: () => audioManager.playGroan({ baseFreq: 140, vibratoRate: 8, vibratoDepth: 30, duration: 1.2, type: 'sine', peak: 0.3, pitchDrift: -100 }),
 };
 
 export function playSound(key) {
@@ -531,4 +547,147 @@ export function playSound(key) {
   if (tryPlayRealSfx(key)) return;
   const def = SOUND_DEFS[key];
   if (def) def();
+}
+
+// --- general ambience (birds/bugs/wind/etc.) + water proximity/underwater loops ---
+//
+// Both live here rather than a separate module since they need the same
+// AudioContext/masterGain/soundEnabled plumbing everything above already
+// has, and (unlike the fixed one-file-per-key REAL_SFX_FILES/REAL_LOOP_FILES
+// above) both need to pick a random file at PLAY time from a pool, which
+// that dict-based system isn't shaped for.
+
+const AMBIENCE_FOLDER = 'assets/audio/ambience/';
+
+// One-shot nature/environment sounds, fired individually and randomly (see
+// updateAmbience) rather than looped - a "living world" background texture
+// distinct from music. Water-specific sounds (LAKE/POND/SWAMP/UNDERW) are
+// handled separately below since they're tied to actual water zones, not
+// fired at random.
+const AMBIENCE_FILES = [
+  'BAT1.WAV', 'BAT2.WAV', 'BIRD1.WAV', 'BIRD2.WAV', 'BIRD3.WAV', 'BIRD4.WAV', 'BIRD5.WAV',
+  'BUBBLE1.WAV', 'BUBBLE2.WAV',
+  'BUG1.WAV', 'BUG2.WAV', 'BUG3.WAV', 'BUG4.WAV', 'BUG5.WAV', 'BUG6.WAV', 'BUG7.WAV', 'BUG8.WAV', 'BUG9.WAV', 'BUG10.WAV',
+  'BUZZ.WAV',
+  'CICADA1.WAV', 'CICADA2.WAV', 'CICADA3.WAV', 'CICADA4.WAV', 'CICADA5.WAV', 'CICADA6.WAV', 'CICADA7.WAV', 'CICADA8.WAV',
+  'CRICKET1.WAV', 'CRICKET2.WAV', 'CRICKET3.WAV', 'CRICKET4.WAV', 'CRICKET5.WAV', 'CRICKET6.WAV',
+  'CRUNCH1.WAV', 'CRUNCH2.WAV',
+  'D_CALL1.WAV', 'D_CALL2.WAV', 'D_CALL3.WAV', 'D_CALL4.WAV', 'D_CALL5.WAV', 'D_CALL6.WAV',
+  'DRIP1.WAV', 'DRIP2.WAV', 'DRIP3.WAV', 'DRIP4.WAV',
+  'FIRE.WAV', 'FLY1.WAV', 'FLY2.WAV',
+  'FOREST1.WAV', 'FOREST2.WAV', 'FOREST3.WAV',
+  'FOX_CALL1.WAV', 'FOX_CALL2.WAV', 'FOX_CALL3.WAV',
+  'FROG1.WAV', 'FROG2.WAV', 'FROG3.WAV', 'FROG4.WAV', 'FROG5.WAV', 'FROG6.WAV', 'FROG7.WAV', 'FROG8.WAV', 'FROG9.WAV', 'FROG10.WAV', 'FROG11.WAV',
+  'GUST1.WAV', 'GUST2.WAV', 'GUST3.WAV', 'GUST4.WAV',
+  'HUM1.WAV', 'HUM2.WAV', 'LEAVES.WAV',
+  'MARSH1.WAV', 'MARSH2.WAV', 'MARSH3.WAV', 'MARSH4.WAV', 'MARSH5.WAV',
+  'NIGHTBUG.WAV', 'OWL1.WAV', 'OWL2.WAV',
+  'SCREECH.WAV', 'SCREECH2.WAV', 'SNAKE.WAV',
+  'STREAM1.WAV', 'STREAM2.WAV',
+  'WAVE.WAV', 'WAVE2.WAV', 'WAVE3.WAV', 'WAVE4.WAV', 'WAVE5.WAV',
+  'WIND1.WAV', 'WIND2.WAV', 'WIND3.WAV', 'WIND4.WAV', 'WIND5.WAV', 'WIND6.WAV', 'WIND7.WAV', 'WIND8.WAV',
+  'WOODPECKER.WAV',
+];
+
+// Plays one ambience clip through its own tiny Web Audio graph (rather than
+// a plain <audio>.play()) so the night variant can route through a lowpass
+// filter and a slowed/deepened playbackRate for a "scarier in the dark"
+// effect - a plain volume/rate tweak on the element alone can't add the
+// muffled filtering.
+function playAmbienceOneShot(file, isNight) {
+  if (!soundEnabled) return;
+  const ctx = audioManager._ensureContext();
+  const audio = new Audio(AMBIENCE_FOLDER + file);
+  audio.volume = 1; // gain node below handles actual level, not the element
+  const source = ctx.createMediaElementSource(audio);
+  const gain = ctx.createGain();
+  gain.gain.value = (isNight ? 0.45 : 0.55) * (audioManager.volume / 0.7);
+
+  if (isNight) {
+    audio.playbackRate = 0.7 + Math.random() * 0.12;
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.value = 850; // muffled/distant - reads as creepier than the crisp daytime version
+    source.connect(filter);
+    filter.connect(gain);
+  } else {
+    source.connect(gain);
+  }
+  gain.connect(audioManager.masterGain);
+  audio.play().catch(() => {});
+}
+
+let _ambienceTimer = 2;
+
+// Call once per gameplay frame (see Game.update) - fires a random ambience
+// one-shot on a ~2s cadence (jittered so it doesn't feel metronomic), using
+// the night-processed variant whenever isNight is true.
+export function updateAmbience(dt, isNight) {
+  _ambienceTimer -= dt;
+  if (_ambienceTimer > 0) return;
+  _ambienceTimer = 1.6 + Math.random() * 1.2;
+  if (!soundEnabled) return;
+  const file = AMBIENCE_FILES[Math.floor(Math.random() * AMBIENCE_FILES.length)];
+  playAmbienceOneShot(file, isNight);
+}
+
+// Water-body ambience (see MapBuilder's water zones / Game's proximity
+// check) - one random file per zone `type` is picked the moment the player
+// comes into range and looped natively until they leave range or the level
+// changes; re-picking every loop restart (rather than mid-loop) keeps a
+// single water body's ambience internally consistent instead of jarringly
+// swapping sounds every few seconds.
+const WATER_AMBIENCE_FILES = {
+  lake: ['LAKE1.WAV', 'LAKE2.WAV', 'LAKE3.WAV', 'LAKE4.WAV', 'LAKE5.WAV', 'LAKE6.WAV'],
+  pond: ['POND1.WAV', 'POND2.WAV', 'POND3.WAV', 'POND4.WAV', 'POND5.WAV', 'POND6.WAV', 'POND7.WAV', 'POND9.WAV'],
+  swamp: ['SWAMP1.WAV', 'SWAMP2.WAV', 'SWAMP3.WAV', 'SWAMP4.WAV'],
+};
+
+let _waterProximityAudio = null;
+let _waterProximityType = null;
+
+export function startWaterProximityAmbience(type) {
+  if (_waterProximityType === type) return; // already playing this zone's ambience
+  stopWaterProximityAmbience();
+  if (!soundEnabled) return;
+  const files = WATER_AMBIENCE_FILES[type];
+  if (!files) return;
+  const file = files[Math.floor(Math.random() * files.length)];
+  const audio = new Audio(AMBIENCE_FOLDER + file);
+  audio.loop = true;
+  audio.volume = 0.4 * (audioManager.volume / 0.7);
+  audio.play().catch(() => {});
+  _waterProximityAudio = audio;
+  _waterProximityType = type;
+}
+
+export function stopWaterProximityAmbience() {
+  if (_waterProximityAudio) {
+    _waterProximityAudio.pause();
+    _waterProximityAudio = null;
+  }
+  _waterProximityType = null;
+}
+
+// Submerged (deep water) ambience - mutually exclusive with the proximity
+// loop above, since being IN the water should replace "hearing it nearby"
+// with the muffled underwater texture. See Player/Zombie waterDepth.
+let _underwaterAudio = null;
+
+export function startUnderwaterAmbience() {
+  if (_underwaterAudio) return;
+  stopWaterProximityAmbience();
+  if (!soundEnabled) return;
+  const audio = new Audio(SFX_FOLDER + 'UNDERW.WAV');
+  audio.loop = true;
+  audio.volume = 0.5 * (audioManager.volume / 0.7);
+  audio.play().catch(() => {});
+  _underwaterAudio = audio;
+}
+
+export function stopUnderwaterAmbience() {
+  if (_underwaterAudio) {
+    _underwaterAudio.pause();
+    _underwaterAudio = null;
+  }
 }

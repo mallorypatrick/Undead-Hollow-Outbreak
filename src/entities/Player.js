@@ -31,6 +31,17 @@ const BLEED_DURATION = 4.5;
 const BLOOD_TRAIL_INTERVAL = 0.3;
 const FOOTPRINT_INTERVAL = 0.22;
 
+// Water system - waterDepth/waterType are set externally by
+// Game._updateWaterEffects (same "Game pokes a simple flag onto the entity"
+// convention already used for e.g. zombie.provoked), read here to modify
+// speed and drive the wade/ripple/breath-meter/drowning behavior.
+const WATER_SHALLOW_SPEED_MULT = 0.55;
+const WATER_DEEP_SPEED_MULT = 0.4;
+const WADE_INTERVAL = 0.4;
+const RIPPLE_INTERVAL = 0.5;
+const BREATH_DRAIN_PER_SEC = 100 / 12; // empties in ~12s fully submerged
+const BREATH_REGEN_PER_SEC = 100 / 2.5; // refills fast once back at the surface
+
 // How far in front of the player's center bullets spawn, so they leave from
 // the gun's muzzle instead of the body's center. The small side offset
 // nudges that point toward the hand holding the gun (a hair to the right
@@ -111,6 +122,14 @@ export class Player {
     this._footContamTimer = 0;
     this._footprintTimer = 0;
     this._contaminationFaction = null;
+
+    // Water system state - see the constants above and _handleWaterEffects.
+    this.waterDepth = null; // null | 'shallow' | 'deep', set externally by Game
+    this.waterType = null; // 'lake' | 'pond' | 'swamp', the zone's flavor
+    this.maxBreath = 100;
+    this.breath = 100;
+    this._wadeTimer = 0;
+    this._rippleTimer = 0;
   }
 
   get currentFrame() {
@@ -171,7 +190,12 @@ export class Player {
     const move = input.getMoveVector();
     const sprinting = input.isDown('ShiftLeft') || input.isDown('ShiftRight') || input.isGamepadSprintHeld();
     const moving = move.x !== 0 || move.y !== 0;
-    const speed = moving && sprinting ? this.runSpeed : this.walkSpeed;
+    let speed = moving && sprinting ? this.runSpeed : this.walkSpeed;
+    // waterDepth is set externally by Game._updateWaterEffects, one frame
+    // behind the position it was computed from - same harmless lag as the
+    // blood-contamination system uses elsewhere.
+    if (this.waterDepth === 'shallow') speed *= WATER_SHALLOW_SPEED_MULT;
+    else if (this.waterDepth === 'deep') speed *= WATER_DEEP_SPEED_MULT;
 
     this.x += move.x * speed * dt;
     this.y += move.y * speed * dt;
@@ -179,7 +203,20 @@ export class Player {
     this._lastMoveVector = move;
     this._isSprinting = sprinting;
 
-    if (moving) {
+    if (moving && this.waterDepth) {
+      this._footstepTimer = 0; // land footsteps stay reset while wading/swimming
+      this._wadeTimer -= dt;
+      if (this._wadeTimer <= 0) {
+        this._wadeTimer = WADE_INTERVAL;
+        playSound('wade');
+      }
+      this._rippleTimer -= dt;
+      if (this._rippleTimer <= 0) {
+        this._rippleTimer = RIPPLE_INTERVAL;
+        this.pendingEvents.push({ type: 'ripple', x: this.x, y: this.y });
+      }
+    } else if (moving) {
+      this._wadeTimer = 0;
       this._footstepTimer -= dt;
       if (this._footstepTimer <= 0) {
         playSound('footstep_walk');
@@ -187,9 +224,26 @@ export class Player {
       }
     } else {
       this._footstepTimer = 0; // next step plays immediately once moving resumes
+      this._wadeTimer = 0;
     }
 
     this._handleBleeding(dt, moving);
+    this._handleBreath(dt);
+  }
+
+  // Deep water drains breath; anywhere else (including shallow/swamp
+  // wading) refills it. Hitting zero drowns the player outright - see
+  // _die('drown'). Game._updateWaterEffects is what actually sets
+  // waterDepth each frame based on distance to the level's water zone.
+  _handleBreath(dt) {
+    if (this.waterDepth === 'deep') {
+      if (this.breath > 0) {
+        this.breath = Math.max(0, this.breath - BREATH_DRAIN_PER_SEC * dt);
+        if (this.breath <= 0 && !this.isDead && !this.godMode) this._die('drown');
+      }
+    } else if (this.breath < this.maxBreath) {
+      this.breath = Math.min(this.maxBreath, this.breath + BREATH_REGEN_PER_SEC * dt);
+    }
   }
 
   // Blood trail (own bleeding) and footprint (walked through someone else's
@@ -570,10 +624,13 @@ export class Player {
     }
   }
 
-  _die() {
+  // `cause` optionally overrides the death sound - currently just 'drown'
+  // (deep water breath meter hitting zero, see _handleBreath), which uses
+  // DIE_UW.WAV instead of the normal death groan.
+  _die(cause = null) {
     this.isDead = true;
     this.actionState = 'death';
-    playSound('death');
+    playSound(cause === 'drown' ? 'drown' : 'death');
     this._startAction('death');
 
     const config = getWeaponConfig(this.currentWeapon);

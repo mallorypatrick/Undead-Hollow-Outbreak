@@ -24,6 +24,16 @@ const BLEED_DURATION = 4.5;
 const BLOOD_TRAIL_INTERVAL = 0.3;
 const FOOTPRINT_INTERVAL = 0.22;
 
+// Water system - waterDepth/waterType are set externally by
+// Game._updateWaterEffects, same convention as Player. Every zombie type
+// (undead or military) wades slower through shallow/deep water, but only
+// military - being human, unlike the undead - has breath/drowning; regular
+// zombies can flounder through deep water forever without dying from it.
+const WATER_SHALLOW_SPEED_MULT = 0.55;
+const WATER_DEEP_SPEED_MULT = 0.4;
+const BREATH_DRAIN_PER_SEC = 100 / 12;
+const BREATH_REGEN_PER_SEC = 100 / 2.5;
+
 // Hostile zombie with a simple chase-and-attack AI. If update() is called
 // with no target (used for the player-turned-zombie handoff on death) it
 // falls back to wandering instead of standing still.
@@ -104,6 +114,14 @@ export class Zombie {
     this._footContamTimer = 0;
     this._footprintTimer = 0;
     this._contaminationFaction = null;
+
+    // Water system state - see the constants above.
+    this.waterDepth = null; // null | 'shallow' | 'deep'
+    this.waterType = null;
+    if (this.faction === 'military') {
+      this.maxBreath = 100;
+      this.breath = 100;
+    }
   }
 
   // `force` is an initial velocity (units/sec) along `angle`; it decays
@@ -126,6 +144,27 @@ export class Zombie {
     let attacked = false;
     let wantsMoan = false;
     let wantsToFire = false;
+
+    // Water slows every zombie type the same way (see the constants above);
+    // waterDepth is refreshed each frame by Game._updateWaterEffects.
+    let effectiveSpeed = this.speed;
+    if (this.waterDepth === 'shallow') effectiveSpeed *= WATER_SHALLOW_SPEED_MULT;
+    else if (this.waterDepth === 'deep') effectiveSpeed *= WATER_DEEP_SPEED_MULT;
+
+    // Military drowns in deep water same as the player does - regular
+    // zombies don't breathe, so they're unaffected regardless of depth.
+    if (this.faction === 'military') {
+      if (this.waterDepth === 'deep') {
+        this.breath = Math.max(0, this.breath - BREATH_DRAIN_PER_SEC * dt);
+        if (this.breath <= 0) {
+          this._drown();
+          this._advanceFrame(dt);
+          return { attacked: false };
+        }
+      } else if (this.breath < this.maxBreath) {
+        this.breath = Math.min(this.maxBreath, this.breath + BREATH_REGEN_PER_SEC * dt);
+      }
+    }
 
     if (target && !target.isDead) {
       const dx = target.x - this.x;
@@ -154,8 +193,8 @@ export class Zombie {
           }
         } else {
           this.state = 'walk';
-          this.x += Math.cos(this.angle) * this.speed * dt;
-          this.y += Math.sin(this.angle) * this.speed * dt;
+          this.x += Math.cos(this.angle) * effectiveSpeed * dt;
+          this.y += Math.sin(this.angle) * effectiveSpeed * dt;
         }
       } else {
         const reach = this.attackRange + this.radius + (target.radius || 0);
@@ -167,8 +206,8 @@ export class Zombie {
           }
         } else {
           this.state = 'walk';
-          this.x += Math.cos(this.angle) * this.speed * dt;
-          this.y += Math.sin(this.angle) * this.speed * dt;
+          this.x += Math.cos(this.angle) * effectiveSpeed * dt;
+          this.y += Math.sin(this.angle) * effectiveSpeed * dt;
         }
       }
     } else {
@@ -179,8 +218,8 @@ export class Zombie {
         this.angle += (Math.random() - 0.5) * Math.PI;
         this._wanderTimer = 1.5 + Math.random() * 2.5;
       }
-      this.x += Math.cos(this.angle) * this.speed * dt;
-      this.y += Math.sin(this.angle) * this.speed * dt;
+      this.x += Math.cos(this.angle) * effectiveSpeed * dt;
+      this.y += Math.sin(this.angle) * effectiveSpeed * dt;
     }
 
     if (this.knockbackVX || this.knockbackVY) {
@@ -263,6 +302,22 @@ export class Zombie {
       playSound(isHuman ? 'hurt' : 'zombie_hit');
     }
     return mitigated;
+  }
+
+  // Military-only, called from update() when breath hits zero in deep
+  // water - bypasses armor/damage entirely since it's not a combat hit, but
+  // otherwise transitions to 'death' the same way takeDamage's lethal branch
+  // does (including the generic "military death" handling in
+  // Game._updateZombies, so a drowned soldier still rises as a zombie same
+  // as any other death cause).
+  _drown() {
+    if (!this.alive || this.state === 'death') return;
+    this.health = 0;
+    this.state = 'death';
+    this.frameTime = 0;
+    this.frameIndex = 0;
+    this._lastState = null;
+    playSound('drown');
   }
 
   _advanceFrame(dt) {

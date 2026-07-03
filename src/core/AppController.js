@@ -75,7 +75,7 @@ export class AppController {
     // players with an older save blob that predates it.
     this.settings = {
       volume: 0.7, graphicsStyle: 'pc', quality: 'high', fullscreen: false, realBulletSprites: false,
-      musicOn: true, soundOn: true, dayNight: 'day', flashlightEnabled: true,
+      musicOn: true, soundOn: true, dayNight: 'night', flashlightEnabled: true,
     };
     Object.assign(this.settings, this._loadSettings());
     this._draggingVolume = false;
@@ -215,7 +215,7 @@ export class AppController {
         // input (cheat codes, the pause key) must run before it.
         this._checkCheatCodes();
         const pausePressed = this.input.wasJustPressed('Escape') || this.input.wasJustPressed('GamepadPause');
-        this.game.update(dt);
+        this.game.update(dt, this.settings.dayNight === 'night');
 
         // Auto-save the instant a campaign run starts and every time it
         // advances to a new level - _lastAutoSavedLevel starts null on a

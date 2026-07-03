@@ -267,20 +267,26 @@ const ENDING_SUCCUMB_HEIGHT = ENDING_SUCCUMB_LINES.reduce((sum, l) => sum + l.ga
 const STORY_INTRO_LINES = [
   { text: 'UNDEAD HOLLOW: OUTBREAK', size: 40, gap: 90 },
   { text: '', size: 20, gap: 20 },
-  { text: 'Patrick grew up in Las Dunas, New Mexico, but built', size: 22, gap: 34 },
-  { text: 'his life in Dallas, Texas, where he spent nearly', size: 22, gap: 34 },
-  { text: 'nineteen years in the gaming industry - a designer,', size: 22, gap: 34 },
-  { text: 'developer, and tester who shipped more titles than', size: 22, gap: 34 },
-  { text: 'he could count.', size: 22, gap: 50 },
+  { text: 'Mason Reed grew up in Las Dunas, New Mexico, but', size: 22, gap: 34 },
+  { text: 'built his life in Dallas, Texas, where he spent', size: 22, gap: 34 },
+  { text: 'nearly nineteen years in the gaming industry - a', size: 22, gap: 34 },
+  { text: 'designer, developer, and tester who shipped more', size: 22, gap: 34 },
+  { text: 'titles than he could count.', size: 22, gap: 50 },
 
   { text: 'A lifelong fan of horror and zombie games, he always', size: 22, gap: 34 },
   { text: 'believed in being prepared for the unexpected.', size: 22, gap: 60 },
 
-  { text: 'He met Jennifer at a gaming convention in Dallas,', size: 22, gap: 34 },
-  { text: 'where they were both working. She loved games as', size: 22, gap: 34 },
-  { text: 'much as he did, along with fast cars, dinosaurs,', size: 22, gap: 34 },
-  { text: 'and the discipline of military life. It was not', size: 22, gap: 34 },
-  { text: 'long before they built a life together.', size: 22, gap: 60 },
+  { text: 'He met Jennifer Reed at a gaming convention in', size: 22, gap: 34 },
+  { text: 'Dallas, where they were both working. She loved', size: 22, gap: 34 },
+  { text: 'games as much as he did, along with fast cars,', size: 22, gap: 34 },
+  { text: 'dinosaurs, and the discipline of military life. It', size: 22, gap: 34 },
+  { text: 'was not long before they built a life together.', size: 22, gap: 60 },
+
+  { text: 'Their daughter, Emma Reed, was born while Jennifer', size: 22, gap: 34 },
+  { text: 'was stationed near Area 51. An evacuation scare not', size: 22, gap: 34 },
+  { text: 'long after separated them for a while - but Mason', size: 22, gap: 34 },
+  { text: 'got Emma out safely, and the two of them were', size: 22, gap: 34 },
+  { text: 'reunited long before any of this began.', size: 22, gap: 60 },
 
   { text: 'Jennifer serves in the military. When she is', size: 22, gap: 34 },
   { text: 'reassigned back to New Mexico, she starts noticing', size: 22, gap: 34 },
@@ -288,7 +294,7 @@ const STORY_INTRO_LINES = [
   { text: 'other, acting violently, displaying behavior no one', size: 22, gap: 34 },
   { text: 'can explain.', size: 22, gap: 60 },
 
-  { text: 'She shows Patrick a video from a birthday party', size: 22, gap: 34 },
+  { text: 'She shows Mason a video from a birthday party', size: 22, gap: 34 },
   { text: 'gone wrong.', size: 22, gap: 50 },
 
   { text: 'A well-dressed stranger, mistaken at first for', size: 22, gap: 34 },
@@ -301,7 +307,7 @@ const STORY_INTRO_LINES = [
   { text: 'recording is the last one seen before the footage', size: 22, gap: 34 },
   { text: 'cuts out.', size: 22, gap: 60 },
 
-  { text: 'Patrick has seen enough of these games to know how', size: 22, gap: 34 },
+  { text: 'Mason has seen enough of these games to know how', size: 22, gap: 34 },
   { text: 'this story goes. He never thought he would end up', size: 22, gap: 34 },
   { text: 'living it.', size: 22, gap: 60 },
 
@@ -310,10 +316,10 @@ const STORY_INTRO_LINES = [
   { text: 'they take together for a long time.', size: 22, gap: 60 },
 
   { text: 'At the base, Jennifer is called away on a classified', size: 22, gap: 34 },
-  { text: 'mission. Patrick is left behind at a separate', size: 22, gap: 34 },
-  { text: 'installation - self-sufficient, with farmland and', size: 22, gap: 34 },
-  { text: 'livestock, built to survive if the world outside', size: 22, gap: 34 },
-  { text: 'falls apart.', size: 22, gap: 60 },
+  { text: 'mission. Mason and Emma are left behind at a', size: 22, gap: 34 },
+  { text: 'separate installation - self-sufficient, with', size: 22, gap: 34 },
+  { text: 'farmland and livestock, built to survive if the', size: 22, gap: 34 },
+  { text: 'world outside falls apart.', size: 22, gap: 60 },
 
   { text: 'He has no idea how soon he will need it to.', size: 26, gap: 90 },
   { text: '', size: 20, gap: 300 },

@@ -236,6 +236,18 @@ export class ParticleSystem {
     }
   }
 
+  // A brief expanding ring where an entity's feet just disturbed water - see
+  // Player/Zombie waterDepth wading, tied to the same cadence as footsteps.
+  spawnRipple(x, y) {
+    this.particles.push({
+      x, y,
+      vx: 0, vy: 0,
+      life: 0,
+      maxLife: 0.6,
+      kind: 'ripple',
+    });
+  }
+
   spawnDecal(x, y) {
     this.decals.push({
       x, y,
@@ -367,6 +379,13 @@ export class ParticleSystem {
         ctx.rotate(p.angle);
         ctx.drawImage(handle.image, -w * MUZZLE_FLASH_ANCHOR.x, -h * MUZZLE_FLASH_ANCHOR.y, w, h);
         ctx.restore();
+      } else if (p.kind === 'ripple') {
+        const progress = p.life / p.maxLife;
+        ctx.strokeStyle = 'rgba(200,230,255,0.7)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(screen.x, screen.y, 4 + progress * 22, 0, Math.PI * 2);
+        ctx.stroke();
       } else {
         ctx.fillStyle = p.dark ? '#4a0f0f' : '#8a1f1f';
         ctx.beginPath();

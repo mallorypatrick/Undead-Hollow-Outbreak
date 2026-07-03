@@ -19,8 +19,13 @@ import { EnvironmentSprites } from '../assets/EnvironmentSprites.js';
 import { tintCanvasSync, ROAD_TINTS } from '../assets/BiomeTint.js';
 import { getStaticImage } from '../core/AssetLoader.js';
 import { buildEnvironment } from '../systems/MapBuilder.js';
+import { getTilesetTile } from '../assets/TilesetLoader.js';
 import { drawDecoration } from '../systems/DecorationRenderer.js';
-import { playSound } from '../systems/AudioManager.js';
+import {
+  playSound, updateAmbience,
+  startWaterProximityAmbience, stopWaterProximityAmbience,
+  startUnderwaterAmbience, stopUnderwaterAmbience,
+} from '../systems/AudioManager.js';
 import { unlockAchievement, ACHIEVEMENTS } from '../platform/Platform.js';
 
 const WORLD_WIDTH = 7680;
@@ -149,7 +154,7 @@ export class Game {
     }
 
     const boundaryWalls = this._buildBoundaryWalls();
-    const env = buildEnvironment(WORLD_WIDTH, WORLD_HEIGHT, boundaryWalls, this.currentBiomeId);
+    const env = buildEnvironment(WORLD_WIDTH, WORLD_HEIGHT, boundaryWalls, this.currentBiomeId, this.currentLevel);
     this.walls = boundaryWalls.concat(env.walls); // rendered as brick walls
     // Cars, trees, gravestones and the exit-gate tombstones are all solid
     // but stay purely-visual decorations (already drawn as sprites) -
@@ -158,6 +163,7 @@ export class Game {
     this.decorations = env.decorations;
     this.getGroundZone = env.getGroundZone;
     this.exitGate = env.exitGate;
+    this.waterZones = env.waterZones;
 
     this.pickups = this._scatterWeaponPickups();
     this.supplies = this._scatterSupplyPickups();
@@ -205,6 +211,12 @@ export class Game {
 
     this.particles.particles.length = 0;
     this.particles.decals.length = 0;
+
+    // A fresh level means the previous one's water zone (if any) no longer
+    // applies - stop any ambience loop it left running rather than let it
+    // bleed into the new level until proximity happens to re-evaluate it.
+    stopWaterProximityAmbience();
+    stopUnderwaterAmbience();
 
     this._survivalTime = 0;
     this._deathHandled = false;
@@ -316,8 +328,10 @@ export class Game {
     }
   }
 
-  update(dt) {
+  update(dt, isNight = false) {
     this._updateFps(dt);
+    this._ambientAnimTime = (this._ambientAnimTime || 0) + dt;
+    updateAmbience(dt, isNight);
 
     // Hitstop: a brief total freeze of gameplay motion on any hit (dealt or
     // taken) for extra impact. Input is still drained every frame so
@@ -356,6 +370,7 @@ export class Game {
     this.camera.update(dt);
     this._updateBullets(dt);
     this._updateZombies(dt);
+    this._updateWaterEffects();
     this._updateBloodContamination();
 
     this.input.endFrame();
@@ -399,6 +414,8 @@ export class Game {
         this.particles.spawnBloodTrail(event.x, event.y, event.faction);
       } else if (event.type === 'footprint') {
         this.particles.spawnFootprint(event.x, event.y, event.faction, event.angle);
+      } else if (event.type === 'ripple') {
+        this.particles.spawnRipple(event.x, event.y);
       }
     }
   }
@@ -624,9 +641,12 @@ export class Game {
       // Same shared-cooldown idea as moans, but much shorter - footsteps
       // should read as a fairly constant shuffling ambience when a group is
       // nearby, this cooldown just stops perfectly-simultaneous requests
-      // from stacking into a single loud click.
+      // from stacking into a single loud click. Wading through a water zone
+      // (waterDepth set by _updateWaterEffects) swaps in the wade sound plus
+      // a ripple particle instead of a normal footstep.
       if (result.wantsFootstep && this._globalFootstepCooldown <= 0) {
-        playSound('footstep_walk');
+        playSound(zombie.waterDepth ? 'wade' : 'footstep_walk');
+        if (zombie.waterDepth) this.particles.spawnRipple(zombie.x, zombie.y);
         this._globalFootstepCooldown = 0.15;
       }
 
@@ -680,6 +700,69 @@ export class Game {
 
     for (const pos of risingAsUndead) {
       this.zombies.push(new Zombie(pos.x, pos.y, 'walker'));
+    }
+  }
+
+  // Returns { depth: 'shallow'|'deep', type } for the water zone (if any)
+  // containing (x, y), else null - see MapBuilder.placeWaterZone for the
+  // ellipse shape this tests against.
+  _getWaterDepthAt(x, y) {
+    for (const zone of this.waterZones) {
+      const nx = (x - zone.x) / zone.shallowRx;
+      const ny = (y - zone.y) / zone.shallowRy;
+      if (nx * nx + ny * ny > 1) continue;
+      if (zone.deepRx > 0) {
+        const dxr = (x - zone.x) / zone.deepRx;
+        const dyr = (y - zone.y) / zone.deepRy;
+        if (dxr * dxr + dyr * dyr <= 1) return { depth: 'deep', type: zone.type };
+      }
+      return { depth: 'shallow', type: zone.type };
+    }
+    return null;
+  }
+
+  // Sets waterDepth/waterType on the player and every living zombie each
+  // frame (Player._handleMovement/_handleBreath and Zombie.update read them
+  // back next frame - same one-frame-lag convention as blood contamination
+  // below), and drives the water-proximity/underwater ambience loops based
+  // on the player's distance to the level's one water zone.
+  _updateWaterEffects() {
+    if (this.player.isDead) {
+      stopUnderwaterAmbience();
+      stopWaterProximityAmbience();
+      return;
+    }
+
+    const info = this._getWaterDepthAt(this.player.x, this.player.y);
+    this.player.waterDepth = info ? info.depth : null;
+    this.player.waterType = info ? info.type : null;
+
+    for (const zombie of this.zombies) {
+      if (zombie.state === 'death') continue;
+      const zInfo = this._getWaterDepthAt(zombie.x, zombie.y);
+      zombie.waterDepth = zInfo ? zInfo.depth : null;
+      zombie.waterType = zInfo ? zInfo.type : null;
+    }
+
+    if (!this.waterZones.length) {
+      stopUnderwaterAmbience();
+      stopWaterProximityAmbience();
+      return;
+    }
+    const zone = this.waterZones[0];
+    const dx = this.player.x - zone.x;
+    const dy = this.player.y - zone.y;
+    const proximityRangeSq = (Math.max(zone.shallowRx, zone.shallowRy) + 700) ** 2;
+
+    if (this.player.waterDepth === 'deep') {
+      startUnderwaterAmbience();
+    } else {
+      stopUnderwaterAmbience();
+      if (dx * dx + dy * dy <= proximityRangeSq) {
+        startWaterProximityAmbience(zone.type);
+      } else {
+        stopWaterProximityAmbience();
+      }
     }
   }
 
@@ -785,6 +868,7 @@ export class Game {
     this.renderer.clear();
 
     this._drawGround(ctx);
+    this._drawWaterZones(ctx);
     for (const wall of this.walls) wall.draw(ctx, this.camera);
     this.particles.drawDecals(ctx, this.camera);
     this.particles.drawFadingDecals(ctx, this.camera);
@@ -798,6 +882,7 @@ export class Game {
 
     this.ui.drawCrosshair(ctx, this.input);
     this.ui.drawHealthBar(ctx, this.player);
+    this.ui.drawBreathMeter(ctx, this.player);
     this.ui.drawWeaponHud(ctx, this.player);
     this.ui.drawInventoryBar(ctx, this.player);
     this.ui.drawLevelLabel(ctx);
@@ -847,6 +932,53 @@ export class Game {
         ctx.imageSmoothingEnabled = false; // crisp pixel-art scaling for the small real grass tile
         ctx.drawImage(tile, screen.x, screen.y, SPRITE_SIZE, SPRITE_SIZE);
       }
+    }
+  }
+
+  // Draws each of this level's water zones (see MapBuilder.placeWaterZone)
+  // as a tiled water texture clipped to an ellipse, with a type-based color
+  // wash (blue for lake/pond, murky green for swamp) and a darker deep-water
+  // ellipse where one exists. Deliberately uses the neutral/untinted water
+  // tile ('farm' biome) regardless of the level's actual biome tint - water
+  // color comes from its own type here, not the biome recolor system, so it
+  // reads consistently across every biome instead of turning brown in the
+  // desert or olive on a military base.
+  _drawWaterZones(ctx) {
+    if (!this.waterZones || !this.waterZones.length) return;
+    const shimmer = 0.85 + Math.sin(this._ambientAnimTime * 1.4) * 0.15;
+    const tile = getTilesetTile('water_1', 'farm').image;
+
+    for (const zone of this.waterZones) {
+      const screen = this.camera.worldToScreen(zone.x, zone.y);
+      const margin = Math.max(zone.shallowRx, zone.shallowRy) + 40;
+      if (screen.x < -margin || screen.x > INTERNAL_WIDTH + margin || screen.y < -margin || screen.y > INTERNAL_HEIGHT + margin) continue;
+
+      ctx.save();
+      ctx.beginPath();
+      ctx.ellipse(screen.x, screen.y, zone.shallowRx, zone.shallowRy, 0, 0, Math.PI * 2);
+      ctx.clip();
+
+      if (tile && (tile.width || tile.naturalWidth)) {
+        const pattern = ctx.createPattern(tile, 'repeat');
+        if (pattern) {
+          ctx.fillStyle = pattern;
+          ctx.globalAlpha = shimmer;
+          ctx.fillRect(screen.x - zone.shallowRx, screen.y - zone.shallowRy, zone.shallowRx * 2, zone.shallowRy * 2);
+          ctx.globalAlpha = 1;
+        }
+      }
+
+      ctx.fillStyle = zone.type === 'swamp' ? 'rgba(64, 74, 34, 0.45)' : 'rgba(30, 90, 140, 0.32)';
+      ctx.fillRect(screen.x - zone.shallowRx, screen.y - zone.shallowRy, zone.shallowRx * 2, zone.shallowRy * 2);
+
+      if (zone.deepRx > 0) {
+        ctx.beginPath();
+        ctx.ellipse(screen.x, screen.y, zone.deepRx, zone.deepRy, 0, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(10, 35, 70, 0.45)';
+        ctx.fill();
+      }
+
+      ctx.restore();
     }
   }
 

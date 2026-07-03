@@ -207,6 +207,42 @@ export class UISystem {
     ctx.restore();
   }
 
+  // Shown while submerged in deep water and for a moment after resurfacing
+  // (while still recovering) - see Player._handleBreath. Blue when full,
+  // shifting toward red as breath runs out, same "danger color" idea as the
+  // health bar's low-health state.
+  drawBreathMeter(ctx, player) {
+    if (player.waterDepth !== 'deep' && player.breath >= player.maxBreath) return;
+    const x = 16;
+    const y = 862;
+    const w = 380;
+    const h = 22;
+    const pct = Math.max(0, player.breath / player.maxBreath);
+
+    ctx.save();
+    ctx.fillStyle = 'rgba(10,15,25,0.65)';
+    ctx.fillRect(x, y, w, h);
+
+    const r = Math.round(220 - pct * 180);
+    const g = Math.round(60 + pct * 140);
+    const b = Math.round(90 + pct * 165);
+    ctx.fillStyle = `rgb(${r},${g},${b})`;
+    ctx.fillRect(x + 3, y + 3, (w - 6) * pct, h - 6);
+
+    ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(x, y, w, h);
+
+    ctx.font = 'bold 13px monospace';
+    ctx.fillStyle = '#f0ece0';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('BREATH', x + w / 2, y + h / 2);
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
+    ctx.restore();
+  }
+
   drawBossHealthBar(ctx, zombie) {
     const width = 900;
     const height = 34;

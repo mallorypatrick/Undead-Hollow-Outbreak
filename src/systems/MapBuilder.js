@@ -50,18 +50,69 @@ const BIOME_LAYOUTS = {
   area51: { roadWidth: 200, treeCount: 0, corpseCount: 30, carCount: 4, hasCemetery: false, sparse: true },
 };
 
-export function buildEnvironment(worldWidth, worldHeight, boundaryWalls, biomeId = 'farm') {
+export function buildEnvironment(worldWidth, worldHeight, boundaryWalls, biomeId = 'farm', levelId = 1) {
   const layout = BIOME_LAYOUTS[biomeId] || BIOME_LAYOUTS.farm;
 
   if (layout.corridorMode) {
-    return buildSubwayEnvironment(worldWidth, worldHeight, boundaryWalls, layout);
+    // No open ground in the subway's wall-maze layout to put a lake in, and
+    // an underground tunnel having one wouldn't fit thematically anyway -
+    // the only level (19) deliberately skipped from the water system.
+    return { ...buildSubwayEnvironment(worldWidth, worldHeight, boundaryWalls, layout), waterZones: [] };
   }
-  return buildOpenWorldEnvironment(worldWidth, worldHeight, boundaryWalls, biomeId, layout);
+  return buildOpenWorldEnvironment(worldWidth, worldHeight, boundaryWalls, biomeId, layout, levelId);
+}
+
+// Cycles every level through all three water types (rather than tying type
+// to biome) so "lake and pond and swamp across maps 1-38" are all
+// genuinely represented over the campaign, not just whichever type one
+// biome happened to get.
+const WATER_TYPE_CYCLE = ['pond', 'lake', 'swamp'];
+const WATER_SHAPE = {
+  // shallow = the wade-through outer ring, deep = the swim/breath-meter
+  // inner zone (see Player/Zombie water handling). Swamp has no deep
+  // sub-zone at all - marsh you wade through, not water you swim in.
+  pond: { shallowMin: 90, shallowMax: 130, deepFrac: 0.35 },
+  lake: { shallowMin: 220, shallowMax: 300, deepFrac: 0.55 },
+  swamp: { shallowMin: 150, shallowMax: 220, deepFrac: 0 },
+};
+
+function isInsideWaterZone(x, y, zone) {
+  if (!zone) return false;
+  const nx = (x - zone.x) / zone.shallowRx;
+  const ny = (y - zone.y) / zone.shallowRy;
+  return nx * nx + ny * ny <= 1;
+}
+
+// Placed early (right after buildings, before trees/cars/corpses/props) so
+// every subsequent scatter loop can just reject points that land inside it -
+// see the isInsideWaterZone checks threaded through below.
+function placeWaterZone(worldWidth, worldHeight, roadBands, cemeteryZone, collidersForPlacement, levelId) {
+  const type = WATER_TYPE_CYCLE[(Math.max(1, levelId) - 1) % WATER_TYPE_CYCLE.length];
+  const shape = WATER_SHAPE[type];
+
+  for (let attempt = 0; attempt < 40; attempt++) {
+    const shallowRx = shape.shallowMin + Math.random() * (shape.shallowMax - shape.shallowMin);
+    const shallowRy = shallowRx * (0.75 + Math.random() * 0.3);
+    const x = shallowRx + 200 + Math.random() * (worldWidth - (shallowRx + 200) * 2);
+    const y = shallowRy + 200 + Math.random() * (worldHeight - (shallowRy + 200) * 2);
+    const testRadius = Math.max(shallowRx, shallowRy) * 1.15;
+
+    if (isInsideAny(x, y, roadBands) || (cemeteryZone && isInsideRect(x, y, cemeteryZone))) continue;
+    if (CollisionSystem.circleIntersectsWalls(x, y, testRadius, collidersForPlacement)) continue;
+
+    return {
+      x, y, type,
+      shallowRx, shallowRy,
+      deepRx: shallowRx * shape.deepFrac,
+      deepRy: shallowRy * shape.deepFrac,
+    };
+  }
+  return null; // no open spot found this attempt budget - level just has no water feature, harmless
 }
 
 // --- shared open-world builder (farm/desert/city/marine_base/army_base/area51) ---
 
-function buildOpenWorldEnvironment(worldWidth, worldHeight, boundaryWalls, biomeId, layout) {
+function buildOpenWorldEnvironment(worldWidth, worldHeight, boundaryWalls, biomeId, layout, levelId) {
   const roadWidth = layout.roadWidth;
   const roadBands = [
     { x: 0, y: worldHeight / 2 - roadWidth / 2, w: worldWidth, h: roadWidth },
@@ -96,6 +147,11 @@ function buildOpenWorldEnvironment(worldWidth, worldHeight, boundaryWalls, biome
     buildArea51Facility(worldWidth, worldHeight, walls, decorations, collidersForPlacement, staticColliders);
   }
 
+  // --- water zone (lake/pond/swamp) - placed early so every scatter loop
+  // below can just reject points landing inside it, same idea as roadBands/
+  // cemeteryZone. See placeWaterZone; null if no open spot was found.
+  const waterZone = placeWaterZone(worldWidth, worldHeight, roadBands, cemeteryZone, collidersForPlacement, levelId);
+
   // --- gravestones, confined to the cemetery patch (farm only) - solid, static meshes ---
   if (cemeteryZone) {
     for (let i = 0; i < 22; i++) {
@@ -129,6 +185,7 @@ function buildOpenWorldEnvironment(worldWidth, worldHeight, boundaryWalls, biome
     const boxH = rotatedSideways ? size.w : size.h;
     const testRadius = Math.max(boxW, boxH) / 2 + CAR_MIN_GAP;
     if (CollisionSystem.circleIntersectsWalls(x, y, testRadius, collidersForPlacement)) continue;
+    if (isInsideWaterZone(x, y, waterZone)) continue;
 
     decorations.push({ x, y, type, rotation });
     const carCollider = { x: x - boxW / 2, y: y - boxH / 2, width: boxW, height: boxH, isCar: true };
@@ -145,6 +202,7 @@ function buildOpenWorldEnvironment(worldWidth, worldHeight, boundaryWalls, biome
     const x = 150 + Math.random() * (worldWidth - 300);
     const y = 150 + Math.random() * (worldHeight - 300);
     if (isInsideAny(x, y, roadBands) || (cemeteryZone && isInsideRect(x, y, cemeteryZone)) || CollisionSystem.circleIntersectsWalls(x, y, 60, collidersForPlacement)) continue;
+    if (isInsideWaterZone(x, y, waterZone)) continue;
     if (biomeId === 'farm') {
       // Mix the procedural tree with the real Happy Harvest tree sprite for variety.
       if (Math.random() < 0.35) {
@@ -166,6 +224,7 @@ function buildOpenWorldEnvironment(worldWidth, worldHeight, boundaryWalls, biome
     const x = 100 + Math.random() * (worldWidth - 200);
     const y = 100 + Math.random() * (worldHeight - 200);
     if (CollisionSystem.circleIntersectsWalls(x, y, 30, collidersForPlacement)) continue;
+    if (isInsideWaterZone(x, y, waterZone)) continue;
     if (Math.random() < 0.3) {
       decorations.push({ x, y, tileId: pick(['corpse_flies_1', 'corpse_flies_2', 'corpse_flies_3']), drawWidth: 70, drawHeight: 70, rotation: Math.random() * Math.PI * 2 });
     } else {
@@ -178,10 +237,10 @@ function buildOpenWorldEnvironment(worldWidth, worldHeight, boundaryWalls, biome
   }
 
   // --- biome-flavor extra decorations, scattered lightly across open ground ---
-  scatterFlavorDecorations(biomeId, worldWidth, worldHeight, roadBands, cemeteryZone, collidersForPlacement, decorations);
+  scatterFlavorDecorations(biomeId, worldWidth, worldHeight, roadBands, cemeteryZone, collidersForPlacement, decorations, waterZone);
 
   // --- small ground clutter (clover/rocks), scattered across every biome ---
-  scatterProps(worldWidth, worldHeight, roadBands, cemeteryZone, collidersForPlacement, decorations);
+  scatterProps(worldWidth, worldHeight, roadBands, cemeteryZone, collidersForPlacement, decorations, waterZone);
 
   // --- level-exit tombstone gate: a pair of solid tombstones near the far
   // edge of the map, straddling the vertical road so it's a natural
@@ -199,6 +258,7 @@ function buildOpenWorldEnvironment(worldWidth, worldHeight, boundaryWalls, biome
     staticColliders,
     decorations,
     exitGate,
+    waterZones: waterZone ? [waterZone] : [],
     getGroundZone(x, y) {
       if (isInsideAny(x, y, roadBands)) return 'road';
       if (cemeteryZone && isInsideRect(x, y, cemeteryZone)) return 'cemetery';
@@ -424,13 +484,14 @@ function buildArea51Facility(worldWidth, worldHeight, walls, decorations, collid
 const PROPS_COUNT = 25;
 const PROPS_SIZE = 36;
 
-function scatterProps(worldWidth, worldHeight, roadBands, cemeteryZone, colliders, decorations) {
+function scatterProps(worldWidth, worldHeight, roadBands, cemeteryZone, colliders, decorations, waterZone) {
   let placed = 0;
   for (let attempt = 0; attempt < PROPS_COUNT * 12 && placed < PROPS_COUNT; attempt++) {
     const x = 150 + Math.random() * (worldWidth - 300);
     const y = 150 + Math.random() * (worldHeight - 300);
     if (isInsideAny(x, y, roadBands) || (cemeteryZone && isInsideRect(x, y, cemeteryZone))) continue;
     if (CollisionSystem.circleIntersectsWalls(x, y, PROPS_SIZE * 0.6, colliders)) continue;
+    if (isInsideWaterZone(x, y, waterZone)) continue;
     decorations.push({ x, y, type: pick(['prop_clover', 'prop_rock']), rotation: Math.random() * Math.PI * 2 });
     placed++;
   }
@@ -438,7 +499,7 @@ function scatterProps(worldWidth, worldHeight, roadBands, cemeteryZone, collider
 
 // --- light per-biome flavor decorations (crops/scarecrow/windmill/urban/broken cars) ---
 
-function scatterFlavorDecorations(biomeId, worldWidth, worldHeight, roadBands, cemeteryZone, colliders, decorations) {
+function scatterFlavorDecorations(biomeId, worldWidth, worldHeight, roadBands, cemeteryZone, colliders, decorations, waterZone) {
   const flavor = {
     // Real Happy Harvest crop sprites (deco.type, tinted by nothing - own
     // colors) instead of the tileset's generic crops_1..4 - this is the
@@ -458,6 +519,7 @@ function scatterFlavorDecorations(biomeId, worldWidth, worldHeight, roadBands, c
       const y = 150 + Math.random() * (worldHeight - 300);
       if (isInsideAny(x, y, roadBands) || (cemeteryZone && isInsideRect(x, y, cemeteryZone))) continue;
       if (CollisionSystem.circleIntersectsWalls(x, y, group.size * 0.6, colliders)) continue;
+      if (isInsideWaterZone(x, y, waterZone)) continue;
       const art = group.type ? { type: pick(group.type) } : { tileId: pick(group.tileId) };
       decorations.push({ x, y, ...art, drawWidth: group.size, drawHeight: group.size, rotation: Math.random() * Math.PI * 2 });
       placed++;
